@@ -93,8 +93,10 @@ def main():
         "--framework", type=str, choices=["pt", "tf"], default="pt", help="The framework to use for the Core ML export."
     )
     parser.add_argument(
-        "--quantize", type=str, choices=["float32", "float16"], default="float16", help="Quantization option for the model weights."
+        "--quantize", type=str, choices=["float32", "float16", "int8", "int4"], default="float16", help="Quantization option for the model weights."
     )
+    parser.add_argument(
+        "--legacy", action="store_true")
     parser.add_argument(
         "--compute_units", type=str, choices=["all", "cpu_and_gpu", "cpu_only", "cpu_and_ne"], default="all", help="Optimize the model for CPU, GPU, and/or Neural Engine."
     )
@@ -126,7 +128,7 @@ def main():
         preprocessor = AutoProcessor.from_pretrained(args.model)
     else:
         raise ValueError(f"Unknown preprocessor type '{args.preprocessor}'")
-    
+
     # Support legacy task names in CLI only
     feature = args.feature
     args.feature = FeaturesManager.map_from_synonym(args.feature)
@@ -139,6 +141,8 @@ def main():
         args.feature, args.model, framework=args.framework, #cache_dir=args.cache_dir
     )
     model_kind, model_coreml_config = FeaturesManager.check_supported_model_or_raise(model, feature=args.feature)
+
+    print(model_coreml_config)
 
     if args.feature in ["text2text-generation", "speech-seq2seq"]:
         logger.info(f"Converting encoder model...")

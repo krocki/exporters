@@ -621,6 +621,10 @@ def export_pytorch(
 
     if config.use_legacy_format and quantize == "float16":
         mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=16)
+    if config.use_legacy_format and quantize == "int8":
+        mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=8)
+    if config.use_legacy_format and quantize == "int4":
+        mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=4)
 
     return mlmodel
 

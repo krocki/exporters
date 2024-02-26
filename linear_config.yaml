@@ -1,0 +1,4 @@
+config_type: "OpLinearQuantizerConfig"
+global_config:
+  mode: "linear"
+  dtype: "int8"
