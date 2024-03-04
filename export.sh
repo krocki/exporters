@@ -1,8 +1,11 @@
 #!/bin/bash
 set -x
 
-#MODEL="mistralai/Mistral-7B-Instruct-v0.2"
-MODEL="teknium/OpenHermes-2-Mistral-7B"
+#MODEL="EleutherAI/pythia-70m-v0"
+#MODEL="TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+MODEL="mistralai/Mistral-7B-Instruct-v0.2"
+#MODEL="teknium/OpenHermes-2-Mistral-7B"
+#MODEL="google/gemma-7b-it"
 
 # Parse named arguments
 while [ "$1" != "" ]; do

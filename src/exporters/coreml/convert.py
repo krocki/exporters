@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, List, Union, Mapping
 
 import coremltools as ct
 from coremltools.converters.mil.frontend.torch.torch_op_registry import _TORCH_OPS_REGISTRY
+import coremltools as ct
+import coremltools.optimize.coreml as cto
 
 import numpy as np
 
@@ -45,6 +47,79 @@ if TYPE_CHECKING:
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
+from coremltools.optimize.coreml import (
+    OpThresholdPrunerConfig,
+    OpMagnitudePrunerConfig,
+    OptimizationConfig,
+    prune_weights,
+)
+
+# OpThresholdPrunerConfig: Sets all weight values below a certain value.
+def prune_weights_threshold(mlmodel, min_sparsity_percentile=0.55, threshold=0.03, weight_threshold=1024):
+
+  logger.info(f"Threshold  Pruning...{min_sparsity_percentile}, {threshold}, {weight_threshold}")
+
+  op_config = OpThresholdPrunerConfig(
+    threshold=threshold,
+    minimum_sparsity_percentile=min_sparsity_percentile,
+    weight_threshold=weight_threshold,
+  )
+  config = OptimizationConfig(global_config=op_config)
+  model_compressed = prune_weights(mlmodel, config=config)
+  logger.info("Done")
+
+  return model_compressed
+
+# OpMagnitudePrunerConfig: Prune the weights with a constant sparsity percentile.
+"""OpThresholdPrunerConfig works by setting all weight values below a certain value, as specified by threshold, to zero. In the resulting weight tensor, sparse representation is used only if the proportion of values that are zero is greater than a level, as specified by minimum_sparsity_percentile. Otherwise dense format will be used.
+
+The weight_threshold parameter specifies the minimum number of elements that the weight tensor must have for this operation to take effect. In the previous code sample, since weight_threshold=1024 was specified, all the weight tensors that have less than 1024 elements will be left untouched, while the tensors of size greater than 1024 will be sparsified according to the threshold and minimum_sparsity_percentile settings.
+https://apple.github.io/coremltools/docs-guides/source/pruning-a-core-ml-model.html
+
+Unless the weights in your Core ML model are known to have a lot of zeros, using data-free pruning is typically going to lead to a large accuracy loss for any meaningful level of sparsity. Therefore, use the prune_weights method to experiment with different patterns and levels of sparsity to see the impact on size reduction and performance, and then use the results as a guiding factor to find a config that then you prune for using fine tuning.
+"""
+
+def prune_weights_magnitude(mlmodel, target_sparsity=0.25, weight_threshold=1024):
+
+  logger.info(f"Magnitude Pruning...{target_sparsity}, {weight_threshold}")
+
+  op_config = OpMagnitudePrunerConfig(
+    target_sparsity=target_sparsity,
+    weight_threshold=weight_threshold,
+  )
+  config = OptimizationConfig(global_config=op_config)
+  model_compressed = prune_weights(mlmodel, config=config)
+  logger.info("Done")
+
+  return model_compressed
+
+def quantize_weights(mlmodel, config_file):
+  logger.info(f"Quantizing... {config_file}")
+  config = cto.OptimizationConfig.from_yaml(config_file)
+  compressed_mlmodel = cto.linear_quantize_weights(mlmodel, config)
+  logger.info("Done")
+  return compressed_mlmodel
+
+def palettize_weights(mlmodel, nbits):
+
+  logger.info(f"Palettizing... {nbits}")
+
+  op_config = ct.optimize.coreml.OpPalettizerConfig(
+    mode="kmeans",
+    nbits=nbits,
+  )
+
+  config = ct.optimize.coreml.OptimizationConfig(
+    global_config=op_config,
+    op_type_configs={
+      "gather": None # avoid quantizing the embedding table
+    }
+  )
+
+  model = ct.optimize.coreml.palettize_weights(mlmodel, config=config)
+  logger.info("Done")
+
+  return model
 def get_output_names(spec):
     """Return a list of all output names in the Core ML model."""
     outputs = []
@@ -507,9 +582,11 @@ def export_pytorch(
     # Create dummy input data for doing the JIT trace.
     dummy_inputs = config.generate_dummy_inputs(preprocessor, framework=TensorType.PYTORCH)
 
+    print(f"dummy inputs =  {dummy_inputs}")
     # Put the inputs in the order from the config.
     example_input = [dummy_inputs[key][0] for key in list(config.inputs.keys())]
 
+    print(f"example inputs =  {example_input}")
     wrapper = Wrapper(preprocessor, model, config).eval()
 
     # Running the model once with gradients disabled prevents an error during JIT tracing
@@ -518,12 +595,14 @@ def export_pytorch(
     with torch.no_grad():
         dummy_output = wrapper(*example_input)
 
+    print(f"dummy output =  {dummy_output}")
     traced_model = torch.jit.trace(wrapper, example_input, strict=True)
 
     # Run the traced PyTorch model to get the shapes of the output tensors.
     with torch.no_grad():
         example_output = traced_model(*example_input)
 
+    print(f"example output =  {example_output}")
     if isinstance(example_output, (tuple, list)):
         example_output = [x.numpy() for x in example_output]
     else:
@@ -541,6 +620,8 @@ def export_pytorch(
     input_tensors = get_input_types(preprocessor, config, dummy_inputs)
 
     patched_ops = config.patch_pytorch_ops()
+
+    print(f"patched {patched_ops}")
     restore_ops = {}
     if patched_ops is not None:
         for name, func in patched_ops.items():
@@ -550,6 +631,10 @@ def export_pytorch(
                 del _TORCH_OPS_REGISTRY[name]
             _TORCH_OPS_REGISTRY[name] = func
 
+    #print(f"{traced_model}")
+    print(f"input_tensors {input_tensors}")
+    print(f"convert kwargs {convert_kwargs}")
+
     mlmodel = ct.convert(
         traced_model,
         inputs=input_tensors,
@@ -558,6 +643,7 @@ def export_pytorch(
         **convert_kwargs,
     )
 
+    #print(f"{restore_ops}")
     if restore_ops is not None:
         for name, func in restore_ops.items():
             if func is not None:
@@ -566,6 +652,7 @@ def export_pytorch(
 
     spec = mlmodel._spec
 
+    #[print(f"{spec}")
     input_descs = config.inputs
     output_descs = config.outputs
 
@@ -616,15 +703,26 @@ def export_pytorch(
 
     spec.description.metadata.shortDescription = config.short_description
 
+    #print(f"mlmodel.input_description =  {mlmodel.input_description}")
+    #print(f"mlmodel.output_description =  {mlmodel.output_description}")
+    #print(f"mlmodel._spec =  {mlmodel._spec}")
+    #print(f"mlmodel.wei =  {mlmodel.weights_dir}")
+    print(f"{spec}")
     # Reload the model in case any input / output names were changed.
     mlmodel = ct.models.MLModel(mlmodel._spec, weights_dir=mlmodel.weights_dir)
 
-    if config.use_legacy_format and quantize == "float16":
-        mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=16)
-    if config.use_legacy_format and quantize == "int8":
-        mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=8)
-    if config.use_legacy_format and quantize == "int4":
-        mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=4)
+    #if config.use_legacy_format and quantize == "float16":
+    #    mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=16)
+    #if config.use_legacy_format and quantize == "int8":
+
+    #mlmodel = quantize_weights(mlmodel, "/home/kamil/convert/linear_config.yaml")
+    #mlmodel = palettize_weights(mlmodel, 8)
+    #mlmodel = prune_weights_magnitude(mlmodel)
+    mlmodel = prune_weights_magnitude(mlmodel)
+    print(mlmodel)
+    #mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=8)
+    #if config.use_legacy_format and quantize == "int4":
+    #mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=4)
 
     return mlmodel
 
