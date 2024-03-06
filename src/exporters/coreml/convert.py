@@ -118,9 +118,8 @@ def palettize_weights(mlmodel, nbits, nbits_linear):
   config = ct.optimize.coreml.OptimizationConfig(
     global_config=global_config,
     op_type_configs={
-      "gather": None, # avoid quantizing the embedding table
-      "const": None
-    }
+      "gather": None # avoid quantizing the embedding table
+    },
     op_name_configs={"linear": linear_config},
   )
 
@@ -595,6 +594,8 @@ def export_pytorch(
     # Put the inputs in the order from the config.
     example_input = [dummy_inputs[key][0] for key in list(config.inputs.keys())]
 
+    print(model)
+
     print(f"example inputs =  {example_input}")
     wrapper = Wrapper(preprocessor, model, config).eval()
 
@@ -725,7 +726,7 @@ def export_pytorch(
     #if config.use_legacy_format and quantize == "int8":
 
     #mlmodel = quantize_weights(mlmodel, "/home/kamil/convert/linear_config.yaml")
-    mlmodel = palettize_weights(mlmodel, 6)
+    mlmodel = palettize_weights(mlmodel, 6, 4)
     #mlmodel = prune_weights_magnitude(mlmodel)
     print(mlmodel)
     #mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=8)
