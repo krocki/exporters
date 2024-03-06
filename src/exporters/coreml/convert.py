@@ -55,7 +55,7 @@ from coremltools.optimize.coreml import (
 )
 
 # OpThresholdPrunerConfig: Sets all weight values below a certain value.
-def prune_weights_threshold(mlmodel, min_sparsity_percentile=0.55, threshold=0.03, weight_threshold=1024):
+def prune_weights_threshold(mlmodel, min_sparsity_percentile=0.75, threshold=0.05, weight_threshold=1024):
 
   logger.info(f"Threshold  Pruning...{min_sparsity_percentile}, {threshold}, {weight_threshold}")
 
@@ -100,26 +100,35 @@ def quantize_weights(mlmodel, config_file):
   logger.info("Done")
   return compressed_mlmodel
 
-def palettize_weights(mlmodel, nbits):
+def palettize_weights(mlmodel, nbits, nbits_linear):
 
   logger.info(f"Palettizing... {nbits}")
+  mlmodel = ct.models.MLModel(mlmodel._spec, weights_dir=mlmodel.weights_dir, compute_units=ct.ComputeUnit.CPU_ONLY)
 
-  op_config = ct.optimize.coreml.OpPalettizerConfig(
+  global_config = ct.optimize.coreml.OpPalettizerConfig(
     mode="kmeans",
     nbits=nbits,
   )
 
+  linear_config = ct.optimize.coreml.OpPalettizerConfig(
+    mode="kmeans",
+    nbits=nbits_linear,
+  )
+
   config = ct.optimize.coreml.OptimizationConfig(
-    global_config=op_config,
+    global_config=global_config,
     op_type_configs={
-      "gather": None # avoid quantizing the embedding table
+      "gather": None, # avoid quantizing the embedding table
+      "const": None
     }
+    op_name_configs={"linear": linear_config},
   )
 
   model = ct.optimize.coreml.palettize_weights(mlmodel, config=config)
   logger.info("Done")
 
   return model
+
 def get_output_names(spec):
     """Return a list of all output names in the Core ML model."""
     outputs = []
@@ -716,9 +725,8 @@ def export_pytorch(
     #if config.use_legacy_format and quantize == "int8":
 
     #mlmodel = quantize_weights(mlmodel, "/home/kamil/convert/linear_config.yaml")
-    #mlmodel = palettize_weights(mlmodel, 8)
+    mlmodel = palettize_weights(mlmodel, 6)
     #mlmodel = prune_weights_magnitude(mlmodel)
-    mlmodel = prune_weights_magnitude(mlmodel)
     print(mlmodel)
     #mlmodel = ct.models.neural_network.quantization_utils.quantize_weights(mlmodel, nbits=8)
     #if config.use_legacy_format and quantize == "int4":
